@@ -74,7 +74,6 @@ function abspath() {
             echo "$(pwd)/$1"
         fi
     fi
-    set +ETx
 } #abspath
 
 ### Command-line processing ###############################################
@@ -287,7 +286,7 @@ esac #command
 
 # --- History ---
 #   2015/03/30  chrisw  Initial version
-#   2015/03/31  chrisw  Further edits
+#   2015/03/31  chrisw  First working version
 
 # vi: set ts=4 sts=4 sw=4 expandtab ai ff=unix: #
 
