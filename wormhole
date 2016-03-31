@@ -284,9 +284,5 @@ messages.  Those are things bilbo already has."
 
 esac #command
 
-# --- History ---
-#   2015/03/30  chrisw  Initial version
-#   2015/03/31  chrisw  First working version
-
 # vi: set ts=4 sts=4 sw=4 expandtab ai ff=unix: #
 
