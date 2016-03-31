@@ -1,0 +1,293 @@
+#!/bin/bash
+# wormhole: Git bundling helper (using git bundles as a wormhole for syncing
+# when direct repo access is unavailable).
+# Copyright 2016 Chris White.  CC-BY-SA 3.0.
+# Initially based on http://stackoverflow.com/a/3639182/2877364 by
+# http://stackoverflow.com/users/119963/jefromi ; heavy modifications made.
+
+### Documentation #########################################################
+helpmsg='wormhole <cmd> [options]
+Copyright (c) 2016 Chris White, CC-BY-SA 3.0 (see source)
+The two hosts are called bilbo and frodo (why not?).  Bilbo is the one
+that starts the process.
+
+Commands and <options>:
+    -h, help    Print this help message
+
+    bilboinit [bundle path]
+                Run in your git directory on bilbo to create a bundle to start
+                the process.  Output is [bundle path] or ./bilbo.bundle .
+
+    frodoinit <destrepo> [bundle path]
+                Run on frodo to unpack bilbo.bundle from bilbo into <destrepo>.
+                If [bundle path] is specified, use it.  Otherwise, use
+                ./bilbo.bundle .
+
+    frodopush [bundle path]
+                Run on frodo to make [bundle path] (default ./frodo.bundle)
+                with changes bilbo lacks.  The second and subsequent times,
+                it will re-use the last [bundle path] unless you specify one.
+
+    bilbopull [bundle path]
+                Run on bilbo to grab from frodo.  The first time, provide the
+                path to frodo.bundle.  Afterwords, run after overwriting
+                frodo.bundle with the latest.
+
+    bilbopush [bundle path]
+                Run on bilbo to make [bundle path] with changes frodo lacks.
+                The default bundle path is the path provided to bilboinit.
+                Any time you specify a [bundle path], that path will be
+                remembered and used by default on subsequent bilbopushes.
+
+    frodopull
+                Run on frodo to grab bilbo.bundle, analogously to bilbopull.
+                Uses the bundle path that was used for frodoinit.
+                Run after overwriting bilbo.bundle with the latest.
+'
+
+### Definitions ###########################################################
+KEY_BILBOBUNDLE="vendor.chrisw.bilbobundle"
+KEY_FRODOBUNDLE="vendor.chrisw.frodobundle"
+
+function echoexit()
+{ #usage: echoexit <exit code> <message to print to stderr>
+    echo "$2" 1>&2
+    exit "$1"
+} #echoexit
+
+function abspath() {
+    # generate absolute path from relative path
+    # $1     : relative filename, which must exist.
+    # return : absolute path
+    # From http://stackoverflow.com/a/23002317/2877364 by
+    # http://stackoverflow.com/users/2709/alexander-klimetschek ,
+    # with docs updated by chrisw
+
+    if [ -d "$1" ]; then
+        # dir
+        (cd "$1"; pwd)
+    elif [ -f "$1" ]; then
+        # file
+        if [[ $1 == */* ]]; then
+            echo "$(cd "${1%/*}"; pwd)/${1##*/}"
+        else
+            echo "$(pwd)/$1"
+        fi
+    fi
+    set +ETx
+} #abspath
+
+### Command-line processing ###############################################
+
+# thanks to http://wiki.bash-hackers.org/howto/getopts_tutorial
+while getopts "h" opt ; do
+    case "$opt" in
+        (h)     echo "$helpmsg" 1>&2
+                exit
+                ;;
+    esac
+done
+shift $((OPTIND-1)) # skip ahead to operands
+[ $# -lt 1 ] && echoexit 1 "$helpmsg"
+
+cmd=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+    # thanks to http://stackoverflow.com/questions/2264428#comment11480091_2264537 by http://stackoverflow.com/users/712605/richard-hansen
+shift # get rid of the command
+
+# Sanity checks that we're on the right machine.  Not guaranteed to catch
+# everything.
+
+if echo "$cmd"|grep -iq bilbo ; then
+    # bilbo commands fail if we're on frodo
+    (git config --local "$KEY_FRODOBUNDLE" ||
+     git config remote.bilbo.url
+    ) &>/dev/null &&
+        echoexit 1 "Can't run $cmd on frodo"
+else
+    # frodo commands fail if we're on bilbo
+    (git config --local "$KEY_BILBOBUNDLE" ||
+     git config remote.frodo.url
+    ) &>/dev/null &&
+        echoexit 1 "Can't run $cmd on bilbo"
+fi
+
+### Main processing #######################################################
+
+case "$cmd" in
+    (help|--help)
+        echo "$helpmsg" 1>&2
+        exit
+        ;;
+
+    (bilboinit)
+        # on bilbo, the initial home of the repo
+        destbundle="${1:-bilbo.bundle}"  # after :- is the default
+        touch "$destbundle"     # so abspath will work.  Also, if the file
+                                # doesn't exist, the -w test below will fail
+        destbundle=$(abspath "$destbundle")
+        [ -w "$destbundle" ] || echoexit 2 "Can't write to $destbundle"
+
+        # Stash the bundle name for bilbopush
+        git config --local "$KEY_BILBOBUNDLE" "$destbundle"
+
+        # Make the bundle
+        git bundle create "$destbundle" --branches --tags || exit $?
+            # Pass the git exit code to the outside world in case it's useful
+        echo ">>> Now send $destbundle to frodo."
+        ;;
+
+    (frodoinit)
+        # Continuing on frodo after transferring the bundle
+
+        # Check options
+        [ $# -lt 1 ] && echoexit 1 "Need a destination repo name"
+        destrepo="$1"
+
+        srcbundle="${2:-bilbo.bundle}"
+        [ -r "$srcbundle" ] || echoexit 2 "Can't access $srcbundle"
+        srcbundle=$(abspath "$srcbundle")
+
+        # Clone the bundle into frodo's repo
+        echo ">>> Cloning from $srcbundle"
+        git clone -o bilbo "$srcbundle" "$destrepo" || exit $?
+        echo ">>> If there's a 'nonexistent ref' warning above, don't worry about it."
+            # Note: no need to save the path to bilbo.bundle in the config
+            # file, since git clone will save it as the remote pull URL.
+
+        cd "$destrepo"      # so the following will work
+
+        # Set up remote tracking branches for all the branches in the bundle
+        for branchname in $(git branch -a | grep 'remotes/bilbo' |
+                            sed 's/^.*remotes\/bilbo\///') ; do
+            git branch "$branchname" "remotes/bilbo/$branchname" || exit $?
+        done
+
+        # Check out the master branch.  Assumes master exists.
+        git checkout master || exit $?
+            # Thanks to https://git.wiki.kernel.org/index.php/Git_FAQ#How_do_I_clone_a_repository_with_all_remotely_tracked_branches.3F ,
+            # with thanks to http://stackoverflow.com/a/7216269/2877364 by
+            # http://stackoverflow.com/users/915724/dave for the link.
+
+        # you now have a clone, complete with remote branches and tags
+
+        echo ">>> Cloned $srcbundle into $destrepo"
+        echo ">>> Remotes:"
+        git remote -v
+        echo ">>> Branches:"
+        git branch -a
+        echo ">>> Status:"
+        git status
+        ;;
+
+    (frodopush)
+        # make some commits on frodo; time to transfer back to bilbo
+        # use the known master branch of bilbo as a basis
+        if [ $# -ge 1 ]; then
+            destbundle="$1"
+            touch "$destbundle" # or -w will fail on the first frodopush
+            [ -w "$destbundle" ] || echoexit 1 "Can't write to $destbundle"
+            destbundle=$(abspath "$destbundle")
+            git config --local "$KEY_FRODOBUNDLE" "$destbundle"
+        elif ! destbundle=$(git config --local --path "$KEY_FRODOBUNDLE") ; then
+            touch frodo.bundle
+            destbundle=$(abspath "frodo.bundle")
+        fi # bundle name specified else
+
+        echo ">>> Don't worry about any 'excluded by the rev-list options'
+messages.  Those are things bilbo already has."
+        git bundle create "$destbundle" ^bilbo/master --branches --tags &&
+            echo ">>> Now send $destbundle to bilbo." || 
+            echoexit $? ">>> If it says 'empty bundle', that means bilbo has everything you do."
+        ;;
+
+    (bilbopull)
+        # After copying frodo.bundle back over to bilbo, **replacing**
+        # any existing frodo.bundle, continue on bilbo.
+
+        # See if the remote already exists.  Thanks to
+        # http://stackoverflow.com/a/26843249/2877364 by
+        # http://stackoverflow.com/users/96823/tig
+
+        if ! git config remote.frodo.url &>/dev/null ; then
+            # Remote doesn't exist, so this is the first time we're
+            # pulling from frodo.
+
+            # Get the bundle name
+            [ $# -ge 1 ] || echoexit 1 "Need a path to the bundle from frodo"
+
+            srcbundle="$1"
+            [ -r "$srcbundle" ] || echoexit 2 "Can't read $srcbundle"
+
+            # Add the remote
+            git bundle verify "$srcbundle" || exit $?
+            git remote add frodo "$srcbundle" || exit $?
+            echo -n ">>> Pulling from "
+            git config remote.frodo.url || exit $?  # exit is a sanity check
+
+            # fetch all the refs from the remote
+            # (creating remote branches like frodo/master if necessary)
+            git fetch frodo || exit $?
+
+            # Make bilbo's master track frodo's master
+            git branch --set-upstream-to frodo/master master || exit $?
+                # Thanks to http://stackoverflow.com/a/6300386/2877364
+                # by http://stackoverflow.com/users/6309/vonc
+
+        else #subsequent times
+
+            echo -n ">>> Pulling from "
+            git config remote.frodo.url ||
+                echoexit $? "...no, can't find remote frodo"
+                # exit is a sanity check
+            git bundle verify `git config remote.frodo.url` || exit $?
+            git fetch frodo || exit $?
+
+        fi #first time else
+
+        git status
+        echo \
+'>>> Reminder: if bilbo and frodo have diverged, rebase your commits on frodo
+    rather than merging!  E.g., git rebase frodo/master master .'
+        ;;
+
+    (bilbopush)
+        # make some commits on bilbo; time to transfer to frodo
+        # again, use the known master branch as a basis
+        if [ $# -ge 1 ]; then
+            destbundle="$1"
+            touch "$destbundle" # or -w will fail on the first bilbopush
+            [ -w "$destbundle" ] || echoexit 1 "Can't write to $destbundle"
+            git config --local "$KEY_BILBOBUNDLE" $(abspath "$destbundle")
+        elif ! destbundle=$(git config --local --path "$KEY_BILBOBUNDLE") ; then
+            touch bilbo.bundle
+            destbundle=$(abspath "bilbo.bundle")
+        fi # bundle name specified else
+
+        echo ">>> Don't worry about any 'excluded by the rev-list options'
+messages.  Those are things bilbo already has."
+        git bundle create "$destbundle" ^frodo/master --branches --tags &&
+            echo ">>> Now send $destbundle to frodo." || 
+            echoexit $? ">>> If it says 'empty bundle', that means bilbo has everything you do."
+        ;;
+
+    (frodopull)
+        # After copying the bundle to frodo, **replacing** the original bundle,
+        # run this to update all the refs
+        echo -n ">>> Pulling from "
+        git config remote.bilbo.url || echoexit $? "...no, can't find remote bilbo"
+        git bundle verify `git config remote.bilbo.url` || exit $?
+        git fetch bilbo || exit $?
+        git status
+        echo \
+'>>> Reminder: if bilbo and frodo have diverged, rebase your commits on bilbo
+    rather than merging!  E.g., git rebase bilbo/master master .'
+        ;;
+
+esac #command
+
+# --- History ---
+#   2015/03/30  chrisw  Initial version
+#   2015/03/31  chrisw  Further edits
+
+# vi: set ts=4 sts=4 sw=4 expandtab ai ff=unix: #
+

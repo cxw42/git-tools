@@ -1,0 +1,30 @@
+#!/bin/bash
+# `git add` only modified files.
+# Copyright (c) 2015--2016 Chris White.  CC-BY-SA 3.0.
+# Modified from script by http://stackoverflow.com/users/582/kevin-ballard ,
+# http://stackoverflow.com/a/14368373/2877364
+
+# Find the top level, to which git-diff-files paths are relative.
+# Thanks to http://stackoverflow.com/a/6748135/2877364 by 
+# http://stackoverflow.com/users/385478/graham-borland
+
+toplevel=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ $? -ne 0 ]  ; then
+  echo "I can't find a working directory in" `pwd` >/dev/stderr
+  exit 2
+fi
+
+# Capture filenames in an array, prefixing each with the path.
+# Modified from http://stackoverflow.com/a/1120952/2877364
+# by http://stackoverflow.com/users/89817/gordon-davisson
+
+while IFS= read -r -u3 -d $'\0' file; do
+  git add "${toplevel}/${file}"
+done 3< <(git diff-files -z --diff-filter=M --name-only)
+
+# Modification history:
+#   2015/08/17  chrisw  Modified to reference files to the top level of
+#                       the working directory.
+
+# vi: set ts=2 sts=2 sw=2 et ai ff=unix: #
+

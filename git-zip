@@ -1,0 +1,65 @@
+#!/bin/bash
+# git-zip: Zip up a git tree.
+# Copyright (c) 2015 Chris White.  CC-BY-SA 3.0
+
+if [ $# -lt 1 ]; then
+  cat <<EOF
+Usage: git-zip <path to repo> [zip file name]
+E.g., git-zip fooproject fooproject.7z
+The default zip file name is the path name with the date tacked on.
+EOF
+  exit
+fi
+
+if [ \! \( -d "$1" -a -r "$1" -a -x "$1" \) ]; then
+  echo "I can't read from directory \"$1\"">/dev/stderr
+  exit 1
+fi
+
+# Find out if there's a git repo there.
+# Thanks to http://stackoverflow.com/a/2185353/2877364 by
+# http://stackoverflow.com/users/140750/william-pursell
+
+pushd "$1" &>/dev/null
+if ! $(git rev-parse --git-dir &>/dev/null) ; then
+  echo "I can't find a git repo in \"$1\"">/dev/stderr
+  exit 2
+fi
+popd &>/dev/null
+
+base=$(basename "${1%.git}")  # %.git strips the .git extension, if any
+if [ $# -lt 2 ]; then
+  zipname="$base-$(date "+%F-%H%M%S")".7z
+else
+  zipname="${2%.7z}.7z" # always 7z
+fi
+
+echo Archiving "$1" into "$zipname"
+
+destfn=$(realpath "$zipname") # grab the absolute path
+
+baretree=`mktemp -d`
+barerepo=".git"   # So it's ready to import back into a working directory
+destdir="$baretree/$barerepo"
+  # Put the .git inside the mktemp directory so the name of the mktemp dir
+  # won't be in the 7z archive
+
+# Thanks to http://gitready.com/intermediate/2009/01/24/sharing-your-changes.html
+git clone --bare "$1" "$destdir"
+pushd "$baretree" &>/dev/null
+cat <<EOF >00README.txt
+To use this, unzip into your working directory and then run
+  git init
+  git checkout -f
+Thanks to
+  http://gitready.com/intermediate/2009/01/24/sharing-your-changes.html
+for this tip!
+EOF
+7z a "$destfn" 00README.txt "$barerepo"
+popd &>/dev/null
+
+rm -rf "$baretree"
+echo Done archiving into "$destfn"
+
+# vi: set ts=2 sts=2 sw=2 et ai ff=unix: #
+
