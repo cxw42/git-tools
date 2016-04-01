@@ -221,7 +221,8 @@ messages.  Those are things bilbo already has."
             git bundle verify "$srcbundle" || exit $?
             git remote add frodo "$srcbundle" || exit $?
             echo -n ">>> Pulling from "
-            git config remote.frodo.url || exit $?  # exit is a sanity check
+            git config remote.frodo.url || # a sanity check
+                echoexit $? "...no, can't find remote frodo (?!!?!)"
 
             # fetch all the refs from the remote
             # (creating remote branches like frodo/master if necessary)
@@ -263,17 +264,18 @@ messages.  Those are things bilbo already has."
         fi # bundle name specified else
 
         echo ">>> Don't worry about any 'excluded by the rev-list options'
-messages.  Those are things bilbo already has."
+messages.  Those are things frodo already has."
         git bundle create "$destbundle" ^frodo/master --branches --tags &&
             echo ">>> Now send $destbundle to frodo." || 
-            echoexit $? ">>> If it says 'empty bundle', that means bilbo has everything you do."
+            echoexit $? ">>> If it says 'empty bundle', that means frodo has everything you do."
         ;;
 
     (frodopull)
         # After copying the bundle to frodo, **replacing** the original bundle,
         # run this to update all the refs
         echo -n ">>> Pulling from "
-        git config remote.bilbo.url || echoexit $? "...no, can't find remote bilbo"
+        git config remote.bilbo.url || 
+            echoexit $? "...no, can't find remote bilbo"
         git bundle verify `git config remote.bilbo.url` || exit $?
         git fetch bilbo || exit $?
         git status
