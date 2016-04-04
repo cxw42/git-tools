@@ -246,7 +246,9 @@ messages.  Those are things bilbo already has."
 
         git status
         echo \
-'>>> Reminder: if bilbo and frodo have diverged, rebase your commits on frodo
+'>>> If all of that succeeded, you can "git merge" or "git pull" the changes
+    from frodo (e.g., if frodo/master is ahead of your master).
+    HOWEVER, if bilbo and frodo have diverged, rebase your commits on frodo
     rather than merging!  E.g., git rebase frodo/master master .'
         ;;
 
@@ -280,7 +282,9 @@ messages.  Those are things frodo already has."
         git fetch bilbo || exit $?
         git status
         echo \
-'>>> Reminder: if bilbo and frodo have diverged, rebase your commits on bilbo
+'>>> If all of that succeeded, you can "git merge" or "git pull" the changes
+    from bilbo (e.g., if bilbo/master is ahead of your master).
+    HOWEVER, if bilbo and frodo have diverged, rebase your commits on bilbo
     rather than merging!  E.g., git rebase bilbo/master master .'
         ;;
 
