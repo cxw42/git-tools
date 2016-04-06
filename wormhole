@@ -28,7 +28,7 @@ Commands and <options>:
                 with changes bilbo lacks.  The second and subsequent times,
                 it will re-use the last [bundle path] unless you specify one.
 
-    bilbopull [bundle path]
+    bilbofetch
                 Run on bilbo to grab from frodo.  The first time, provide the
                 path to frodo.bundle.  Afterwords, run after overwriting
                 frodo.bundle with the latest.
@@ -39,15 +39,21 @@ Commands and <options>:
                 Any time you specify a [bundle path], that path will be
                 remembered and used by default on subsequent bilbopushes.
 
-    frodopull
-                Run on frodo to grab bilbo.bundle, analogously to bilbopull.
+    frodofetch
+                Run on frodo to grab bilbo.bundle, analogously to bilbofetch.
                 Uses the bundle path that was used for frodoinit.
                 Run after overwriting bilbo.bundle with the latest.
 '
 
 ### Definitions ###########################################################
 KEY_BILBOBUNDLE="vendor.chrisw.bilbobundle"
+    # bilbopush: Filename of the bundle to push to
 KEY_FRODOBUNDLE="vendor.chrisw.frodobundle"
+    # frodopush: Filename of the bundle to push to
+KEY_BILBOMTIME="vendor.chrisw.bilbomtime"
+    # frodofetch: Last-modified time of the bilbo bundle, in seconds since Epoch
+KEY_FRODOMTIME="vendor.chrisw.frodomtime"
+    # bilbofetch: Last-modified time of the frodo bundle, in sec. since Epoch
 
 function echoexit()
 { #usage: echoexit <exit code> <message to print to stderr>
@@ -169,6 +175,12 @@ case "$cmd" in
 
         # you now have a clone, complete with remote branches and tags
 
+        # Since we succeeded, stash the bundle's mtime for later sanity checks
+        mtime=$(stat -c %Y "$srcbundle")
+        git config --local --int "$KEY_BILBOMTIME" "$mtime"
+
+        # Report
+
         echo ">>> Cloned $srcbundle into $destrepo"
         echo ">>> Remotes:"
         git remote -v
@@ -195,11 +207,11 @@ case "$cmd" in
         echo ">>> Don't worry about any 'excluded by the rev-list options'
 messages.  Those are things bilbo already has."
         git bundle create "$destbundle" ^bilbo/master --branches --tags &&
-            echo ">>> Now send $destbundle to bilbo." || 
+            echo ">>> Now send $destbundle to bilbo." ||
             echoexit $? ">>> If it says 'empty bundle', that means bilbo has everything you do."
         ;;
 
-    (bilbopull)
+    (bilbofetch)
         # After copying frodo.bundle back over to bilbo, **replacing**
         # any existing frodo.bundle, continue on bilbo.
 
@@ -207,9 +219,10 @@ messages.  Those are things bilbo already has."
         # http://stackoverflow.com/a/26843249/2877364 by
         # http://stackoverflow.com/users/96823/tig
 
-        if ! git config remote.frodo.url &>/dev/null ; then
+        srcbundle=$(git config --path remote.frodo.url)
+        if [ $? -ne 0 ]; then
             # Remote doesn't exist, so this is the first time we're
-            # pulling from frodo.
+            # fetching from frodo.
 
             # Get the bundle name
             [ $# -ge 1 ] || echoexit 1 "Need a path to the bundle from frodo"
@@ -220,7 +233,7 @@ messages.  Those are things bilbo already has."
             # Add the remote
             git bundle verify "$srcbundle" || exit $?
             git remote add frodo "$srcbundle" || exit $?
-            echo -n ">>> Pulling from "
+            echo -n ">>> Fetching from "
             git config remote.frodo.url || # a sanity check
                 echoexit $? "...no, can't find remote frodo (?!!?!)"
 
@@ -233,18 +246,43 @@ messages.  Those are things bilbo already has."
                 # Thanks to http://stackoverflow.com/a/6300386/2877364
                 # by http://stackoverflow.com/users/6309/vonc
 
+            # Since we succeeded, stash the bundle's mtime for later sanity checks
+            mtime=$(stat -c %Y "$srcbundle")
+            git config --local --int "$KEY_FRODOMTIME" "$mtime"
+            shouldwarn=""      # no warning about mtime
+
         else #subsequent times
 
-            echo -n ">>> Pulling from "
+            # Sanity check: has the mtime changed?  Warn if not.
+            mtime=$(stat -c %Y "$srcbundle") ||
+                echoexit 2 "Can't stat $srcbundle"
+            shouldwarn=$(   # should we print the warning below?
+                lastmtime=$(git config --local --int "$KEY_FRODOMTIME") &&
+                [ \! "$mtime" -gt "$lastmtime" ] &&
+                echo 1)
+
+            # Fetch
+            echo -n ">>> Fetching from "
             git config remote.frodo.url ||
                 echoexit $? "...no, can't find remote frodo"
                 # exit is a sanity check
             git bundle verify `git config remote.frodo.url` || exit $?
             git fetch frodo || exit $?
 
+            # Since we succeeded, stash the bundle's mtime for later sanity checks
+            mtime=$(stat -c %Y "$srcbundle")
+            git config --local --int "$KEY_FRODOMTIME" "$mtime"
+
         fi #first time else
 
+        # Report
         git status
+        if [ "$shouldwarn" ]; then
+            echo \
+">>> WARNING: $srcbundle does not appear to be newer than at
+    the last bilbofetch.  Did you update it with the latest?" 1>&2
+        fi
+
         echo \
 '>>> If all of that succeeded, you can "git merge" or "git pull" the changes
     from frodo (e.g., if frodo/master is ahead of your master).
@@ -268,19 +306,42 @@ messages.  Those are things bilbo already has."
         echo ">>> Don't worry about any 'excluded by the rev-list options'
 messages.  Those are things frodo already has."
         git bundle create "$destbundle" ^frodo/master --branches --tags &&
-            echo ">>> Now send $destbundle to frodo." || 
+            echo ">>> Now send $destbundle to frodo." ||
             echoexit $? ">>> If it says 'empty bundle', that means frodo has everything you do."
         ;;
 
-    (frodopull)
+    (frodofetch)
         # After copying the bundle to frodo, **replacing** the original bundle,
         # run this to update all the refs
-        echo -n ">>> Pulling from "
-        git config remote.bilbo.url || 
-            echoexit $? "...no, can't find remote bilbo"
-        git bundle verify `git config remote.bilbo.url` || exit $?
+
+        srcbundle=$(git config --path remote.bilbo.url) ||
+            echoexit 1 "The bilbo remote doesn't seem to exist!"
+
+        # Sanity check: has the mtime changed?  Warn if not.
+        mtime=$(stat -c %Y "$srcbundle") ||
+            echoexit 2 "Can't stat $srcbundle"
+        shouldwarn=$(   # should we print the warning below?
+            lastmtime=$(git config --local --int "$KEY_BILBOMTIME") &&
+            [ \! "$mtime" -gt "$lastmtime" ] &&
+            echo 1)
+
+        # Fetch
+        echo ">>> Fetching from $srcbundle"
+        git bundle verify "$srcbundle" || exit $?
         git fetch bilbo || exit $?
+
+        # Since we succeeded, stash the bundle's mtime for later sanity checks
+        mtime=$(stat -c %Y "$srcbundle")
+        git config --local --int "$KEY_BILBOMTIME" "$mtime"
+
+        # Report
         git status
+        if [ $shouldwarn ]; then
+            echo \
+">>> WARNING: $srcbundle does not appear to be newer than at
+    the last frodofetch.  Did you update it with the latest?" 1>&2
+        fi
+
         echo \
 '>>> If all of that succeeded, you can "git merge" or "git pull" the changes
     from bilbo (e.g., if bilbo/master is ahead of your master).
