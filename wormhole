@@ -176,8 +176,9 @@ case "$cmd" in
         # you now have a clone, complete with remote branches and tags
 
         # Since we succeeded, stash the bundle's mtime for later sanity checks
-        mtime=$(stat -c %Y "$srcbundle")
-        git config --local --int "$KEY_BILBOMTIME" "$mtime"
+        if mtime=$(stat -c %Y "$srcbundle" 2>/dev/null ) ; then
+            git config --local --int "$KEY_BILBOMTIME" "$mtime"
+        fi
 
         # Report
 
@@ -247,19 +248,20 @@ messages.  Those are things bilbo already has."
                 # by http://stackoverflow.com/users/6309/vonc
 
             # Since we succeeded, stash the bundle's mtime for later sanity checks
-            mtime=$(stat -c %Y "$srcbundle")
-            git config --local --int "$KEY_FRODOMTIME" "$mtime"
+            if mtime=$(stat -c %Y "$srcbundle" 2>/dev/null) ; then
+                git config --local --int "$KEY_FRODOMTIME" "$mtime"
+            fi
             shouldwarn=""      # no warning about mtime
 
         else #subsequent times
 
             # Sanity check: has the mtime changed?  Warn if not.
-            mtime=$(stat -c %Y "$srcbundle") ||
-                echoexit 2 "Can't stat $srcbundle"
-            shouldwarn=$(   # should we print the warning below?
-                lastmtime=$(git config --local --int "$KEY_FRODOMTIME") &&
-                [ \! "$mtime" -gt "$lastmtime" ] &&
-                echo 1)
+            if mtime=$(stat -c %Y "$srcbundle" 2>/dev/null) ; then
+                shouldwarn=$(   # should we print the warning below?
+                    lastmtime=$(git config --local --int "$KEY_FRODOMTIME") &&
+                    [ \! "$mtime" -gt "$lastmtime" ] &&
+                    echo 1)
+            fi
 
             # Fetch
             echo -n ">>> Fetching from "
@@ -270,8 +272,9 @@ messages.  Those are things bilbo already has."
             git fetch frodo || exit $?
 
             # Since we succeeded, stash the bundle's mtime for later sanity checks
-            mtime=$(stat -c %Y "$srcbundle")
-            git config --local --int "$KEY_FRODOMTIME" "$mtime"
+            if mtime=$(stat -c %Y "$srcbundle" 2>/dev/null); then
+                git config --local --int "$KEY_FRODOMTIME" "$mtime"
+            fi
 
         fi #first time else
 
@@ -318,12 +321,12 @@ messages.  Those are things frodo already has."
             echoexit 1 "The bilbo remote doesn't seem to exist!"
 
         # Sanity check: has the mtime changed?  Warn if not.
-        mtime=$(stat -c %Y "$srcbundle") ||
-            echoexit 2 "Can't stat $srcbundle"
-        shouldwarn=$(   # should we print the warning below?
-            lastmtime=$(git config --local --int "$KEY_BILBOMTIME") &&
-            [ \! "$mtime" -gt "$lastmtime" ] &&
-            echo 1)
+        if mtime=$(stat -c %Y "$srcbundle" 2>/dev/null) ; then
+            shouldwarn=$(   # should we print the warning below?
+                lastmtime=$(git config --local --int "$KEY_BILBOMTIME") &&
+                [ \! "$mtime" -gt "$lastmtime" ] &&
+                echo 1)
+        fi
 
         # Fetch
         echo ">>> Fetching from $srcbundle"
@@ -331,8 +334,9 @@ messages.  Those are things frodo already has."
         git fetch bilbo || exit $?
 
         # Since we succeeded, stash the bundle's mtime for later sanity checks
-        mtime=$(stat -c %Y "$srcbundle")
-        git config --local --int "$KEY_BILBOMTIME" "$mtime"
+        if mtime=$(stat -c %Y "$srcbundle" 2>/dev/null) ; then
+            git config --local --int "$KEY_BILBOMTIME" "$mtime"
+        fi
 
         # Report
         git status
