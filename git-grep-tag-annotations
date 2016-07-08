@@ -1,0 +1,15 @@
+#!/bin/bash
+# git-grep-tag-annotations: Search the contents of the tag annotations
+# in the current repo, and print the matching tag names.
+# CC-BY-SA 3.0.  From http://stackoverflow.com/a/38212190
+# By http://stackoverflow.com/users/5287221/chananel-p
+# and http://stackoverflow.com/users/2877364/cxw
+
+if [ $# -lt 1 ]; then
+    echo "Usage: git-grep-tag-annotations <gawk regexp>" 1>&2
+    exit
+fi
+
+git tag -l -n99 | gawk -v pat="$1" -- '/^\S/ {tag=$1} $0~pat { print tag }'
+
+# vi: set ts=4 sts=4 sw=4 expandtab ai ff=unix: #
