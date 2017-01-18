@@ -87,7 +87,7 @@ function abspath() {
 # thanks to http://wiki.bash-hackers.org/howto/getopts_tutorial
 while getopts "h" opt ; do
     case "$opt" in
-        (h)     echo "$helpmsg" 1>&2
+        (h)     echo "$helpmsg"
                 exit
                 ;;
     esac
@@ -120,7 +120,7 @@ fi
 
 case "$cmd" in
     (help|--help)
-        echo "$helpmsg" 1>&2
+        echo "$helpmsg"
         exit
         ;;
 
@@ -353,6 +353,11 @@ messages.  Those are things frodo already has."
     rather than merging!  E.g., git rebase bilbo/master master .'
         ;;
 
+    (*)
+        echoexit 1 \
+            "$(printf "Unknown command \"%s\".\nRun \"wormhole -h\" for help." \
+                "$cmd")"
+        ;;
 esac #command
 
 # vi: set ts=4 sts=4 sw=4 expandtab ai ff=unix: #
