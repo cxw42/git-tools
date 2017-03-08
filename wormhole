@@ -25,20 +25,23 @@ Commands and <options>:
                 ./bilbo.bundle .
 
     frodopush [bundle path]
-                Run on frodo to make [bundle path] (default ./frodo.bundle)
-                with changes bilbo lacks.  The second and subsequent times,
-                it will re-use the last [bundle path] unless you specify one.
+                Run in your repo on frodo to make [bundle path]
+                (default ./frodo.bundle) with changes bilbo lacks.
+                The second and subsequent times, it will re-use the last
+                [bundle path] unless you specify one.
 
-    bilbofetch
-                Run on bilbo to grab from frodo.  The first time, provide the
-                path to frodo.bundle.  Afterwords, run after overwriting
+    bilbofetch [bundle path]
+                Run in your repo on bilbo to grab from frodo.
+                The first time, provide the path to frodo.bundle.
+                Afterwords, run after overwriting
                 frodo.bundle with the latest.
 
     bilbopush [bundle path]
-                Run on bilbo to make [bundle path] with changes frodo lacks.
-                The default bundle path is the path provided to bilboinit.
-                Any time you specify a [bundle path], that path will be
-                remembered and used by default on subsequent bilbopushes.
+                Run in your repo on bilbo to make [bundle path] with
+                changes frodo lacks.  The default bundle path is the
+                path provided to bilboinit.  Any time you specify a
+                [bundle path], that path will be remembered and used
+                by default on subsequent bilbopushes.
 
     frodofetch
                 Run on frodo to grab bilbo.bundle, analogously to bilbofetch.
@@ -52,7 +55,7 @@ KEY_BILBOBUNDLE="vendor.chrisw.bilbobundle"
 KEY_FRODOBUNDLE="vendor.chrisw.frodobundle"
     # frodopush: Filename of the bundle to push to
 KEY_BILBOMTIME="vendor.chrisw.bilbomtime"
-    # frodofetch: Last-modified time of the bilbo bundle, in seconds since Epoch
+    # frodofetch: Last-modified time of the bilbo bundle, in sec. since Epoch
 KEY_FRODOMTIME="vendor.chrisw.frodomtime"
     # bilbofetch: Last-modified time of the frodo bundle, in sec. since Epoch
 
@@ -60,7 +63,7 @@ function echoexit()
 { #usage: echoexit <exit code> <message to print to stderr>
     echo "$2" 1>&2
     exit "$1"
-} #echoexit
+} #echoexit()
 
 function abspath() {
     # generate absolute path from relative path
@@ -81,7 +84,14 @@ function abspath() {
             echo "$(pwd)/$1"
         fi
     fi
-} #abspath
+} #abspath()
+
+function confirmrepo() {
+    # Die if we are not in a repo.
+    # $1 is the command we are running.
+    git rev-parse --show-toplevel &>/dev/null ||
+        echoexit 2 "Please cd to your repo, than try $1 again"
+} #confirmrepo()
 
 ### Command-line processing ###############################################
 
@@ -132,6 +142,9 @@ case "$cmd" in
 
     (bilboinit)
         # on bilbo, the initial home of the repo
+
+        confirmrepo "$cmd"
+
         destbundle="${1:-bilbo.bundle}"  # after :- is the default
         touch "$destbundle"     # so abspath will work.  Also, if the file
                                 # doesn't exist, the -w test below will fail
@@ -200,6 +213,9 @@ case "$cmd" in
     (frodopush)
         # make some commits on frodo; time to transfer back to bilbo
         # use the known master branch of bilbo as a basis
+
+        confirmrepo "$cmd"
+
         if [ $# -ge 1 ]; then
             destbundle="$1"
             touch "$destbundle" # or -w will fail on the first frodopush
@@ -221,6 +237,8 @@ messages.  Those are things bilbo already has."
     (bilbofetch)
         # After copying frodo.bundle back over to bilbo, **replacing**
         # any existing frodo.bundle, continue on bilbo.
+
+        confirmrepo "$cmd"
 
         # See if the remote already exists.  Thanks to
         # http://stackoverflow.com/a/26843249/2877364 by
@@ -302,6 +320,9 @@ messages.  Those are things bilbo already has."
     (bilbopush)
         # make some commits on bilbo; time to transfer to frodo
         # again, use the known master branch as a basis
+
+        confirmrepo "$cmd"
+
         if [ $# -ge 1 ]; then
             destbundle="$1"
             touch "$destbundle" # or -w will fail on the first bilbopush
@@ -322,6 +343,8 @@ messages.  Those are things frodo already has."
     (frodofetch)
         # After copying the bundle to frodo, **replacing** the original bundle,
         # run this to update all the refs
+
+        confirmrepo "$cmd"
 
         srcbundle=$(git config --path remote.bilbo.url) ||
             echoexit 1 "The bilbo remote doesn't seem to exist!"
