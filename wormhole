@@ -1,18 +1,19 @@
 #!/bin/bash
 # wormhole: Git bundling helper (using git bundles as a wormhole for syncing
 # when direct repo access is unavailable).
-# Copyright 2016 Chris White.  CC-BY-SA 3.0.
+# Copyright 2016--2017 Chris White.  CC-BY-SA 3.0.
 # Initially based on http://stackoverflow.com/a/3639182/2877364 by
 # http://stackoverflow.com/users/119963/jefromi ; heavy modifications made.
 
 ### Documentation #########################################################
 helpmsg='wormhole <cmd> [options]
-Copyright (c) 2016 Chris White, CC-BY-SA 3.0 (see source)
+Copyright (c) 2016--2017 Chris White, CC-BY-SA 3.0 (see source)
 The two hosts are called bilbo and frodo (why not?).  Bilbo is the one
 that starts the process.
 
 Commands and <options>:
-    -h, help    Print this help message
+    -h, --help, help
+                Print this help message
 
     bilboinit [bundle path]
                 Run in your git directory on bilbo to create a bundle to start
@@ -93,10 +94,15 @@ while getopts "h" opt ; do
     esac
 done
 shift $((OPTIND-1)) # skip ahead to operands
-[ $# -lt 1 ] && echoexit 1 "$helpmsg"
+if [[ $# -lt 1 ]]; then
+    echo "$helpmsg"     # to stdout so it can be paged
+    exit 1
+fi
 
 cmd=$(echo "$1" | tr '[:upper:]' '[:lower:]')
-    # thanks to http://stackoverflow.com/questions/2264428#comment11480091_2264537 by http://stackoverflow.com/users/712605/richard-hansen
+    # which command the caller has requested.
+    # thanks to http://stackoverflow.com/questions/2264428#comment11480091_2264537
+    # by http://stackoverflow.com/users/712605/richard-hansen
 shift # get rid of the command
 
 # Sanity checks that we're on the right machine.  Not guaranteed to catch
