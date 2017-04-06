@@ -156,7 +156,10 @@ case "$cmd" in
 
         # Make the bundle
         git bundle create "$destbundle" --branches --tags || exit $?
-            # Pass the git exit code to the outside world in case it's useful
+            # Pass the git exit code to the outside world in case it's useful.
+            # Note: --branches --tags, NOT --all, because the recipient
+            # doesn't care where any other remotes we have may be.
+            # See git-rev-list(1) for more.
         echo ">>> Now send $destbundle to frodo."
         ;;
 
@@ -390,4 +393,3 @@ messages.  Those are things frodo already has."
 esac #command
 
 # vi: set ts=4 sts=4 sw=4 expandtab ai ff=unix: #
-
