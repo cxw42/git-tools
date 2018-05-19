@@ -10,87 +10,103 @@
 # Print the full help text, or, if $1 is provided, only section $1
 function print_help()
 {
-    # Which sections to print, or empty for all
-    s=
-    (( $# )) && s="$1"
-
-    # What to print
-    msg=
-
-    [[ ! $s ]] && msg+=\
-'wormhole <cmd> [options]
-Copyright (c) 2016--2017 Chris White, CC-BY-SA 3.0 (see source)
+    # Basic intro
+    cat <<EOT
+wormhole <cmd> [options]
+Copyright (c) 2016--2018 Chris White, CC-BY-SA 3.0 (see source)
 The two hosts are called bilbo and frodo (why not?).  Bilbo is the one
 that starts the process.
+EOT
 
+    s=''        # Which sections to print, or empty for all
+    (( $# )) && s="$1"
+
+    ok=''       # Whether $s (if given) is valid
+
+    msg=''      # What to print
+
+    brief_help='
+Run "wormhole help <cmd>" for help about <cmd> (or "wormhole help" for all).
+Valid <cmd>s: bilboinit, frodoinit, frodopush, bilbofetch, bilbopush,
+              frodofetch, touch
+'
+
+    if [[ $1 = 'brief' ]]; then
+        echo -n "$brief_help"
+        return
+    fi
+
+    [[ -z $s ]] && ok='yes' && msg+=\
+'
 Commands and <options>:
     -h, --help, help
                 Print this help message
-
 '
 
-    [[ ! $s || $s = bilboinit || $s = bi ]] && msg+=\
-'    bilboinit, bi [bundle path]
+    [[ -z $s || $s = bilboinit || $s = bi ]] && ok='yes' && msg+=\
+'
+    bilboinit, bi [bundle path]
                 Run in your git directory on bilbo to create a bundle to start
                 the process.  Output is [bundle path] or ./bilbo.bundle .
-
 '
 
-    [[ ! $s || $s = frodoinit || $s = 'fi' ]] && msg+=\
-'    frodoinit, fi <destrepo> [bundle path]
+    [[ -z $s || $s = frodoinit || $s = 'fi' ]] && ok='yes' && msg+=\
+'
+    frodoinit, fi <destrepo> [bundle path]
                 Run on frodo to unpack bilbo.bundle from bilbo into <destrepo>.
                 If [bundle path] is specified, use it.  Otherwise, use
                 ./bilbo.bundle .
-
 '
 
-    [[ ! $s || $s = frodopush || $s = fp ]] && msg+=\
-'    frodopush, fp [bundle path]
+    [[ -z $s || $s = frodopush || $s = fp ]] && ok='yes' && msg+=\
+'
+    frodopush, fp [bundle path]
                 Run in your repo on frodo to make [bundle path]
                 (default ./frodo.bundle) with changes bilbo lacks.
                 The second and subsequent times, it will re-use the last
                 [bundle path] unless you specify one.
-
 '
 
-    [[ ! $s || $s = bilbofetch || $s = bf ]] && msg+=\
-'    bilbofetch, bf [bundle path]
+    [[ -z $s || $s = bilbofetch || $s = bf ]] && ok='yes' && msg+=\
+'
+    bilbofetch, bf [bundle path]
                 Run in your repo on bilbo to grab from frodo.
                 The first time, provide the path to frodo.bundle.
                 Afterwords, run after overwriting
                 frodo.bundle with the latest.
                 If you specify a bundle path after the first time, it will be
                 used as the default for future bilbofetches.
-
 '
 
-    [[ ! $s || $s = bilbopush || $s = bp ]] && msg+=\
-'    bilbopush, bp [bundle path]
+    [[ -z $s || $s = bilbopush || $s = bp ]] && ok='yes' && msg+=\
+'
+    bilbopush, bp [bundle path]
                 Run in your repo on bilbo to make [bundle path] with
                 changes frodo lacks.  The default bundle path is the
                 path provided to bilboinit.  Any time you specify a
                 [bundle path], that path will be remembered and used
                 by default on subsequent bilbopushes.
-
 '
 
-    [[ ! $s || $s = frodofetch || $s = ff ]] && msg+=\
-'    frodofetch, ff
+    [[ -z $s || $s = frodofetch || $s = ff ]] && ok='yes' && msg+=\
+'
+    frodofetch, ff
                 Run on frodo to grab bilbo.bundle, analogously to bilbofetch.
                 Uses the bundle path that was used for frodoinit.
                 Run after overwriting bilbo.bundle with the latest.
                 If you specify a bundle path after the first time, it will be
                 used as the default for future frodofetches.
-
 '
 
-    [[ ! $s || $s = touch ]] && msg+=\
-'    touch
+    [[ -z $s || $s = touch ]] && ok='yes' && msg+=\
+'
+    touch
                 Creates an empty commit in the current repo.  Useful if you
                 want to send a bundle to resync, but you have not made any
                 real commits yet.
-
 '
+
+    [[ -z "$ok" ]] && msg+="Unknown command '$s'."$'\n'"${brief_help}"
 
     [[ $msg ]] && echo -n "$msg"    # -n because the text already has \n's
 
@@ -148,28 +164,49 @@ function confirmrepo() {
 
 ### Command-line processing ###############################################
 
+argv=("$@")
+want_help=''
+
 # thanks to http://wiki.bash-hackers.org/howto/getopts_tutorial
-while getopts "h" opt ; do
+while getopts ':h' opt ; do
     case "$opt" in
-        (h)     print_help
-                exit
+        (h)     want_help='yes'
+                break
                 ;;
-        (*)     echoexit 1 "Unknown option $opt"
+        (*)     if [[ "${argv[$OPTIND-1]}" = "--help" ]]; then
+                    want_help='yes'
+                    shift   # OK since we're about to break
+                    break
+                else
+                    echoexit 1 "Unknown option ${argv[$OPTIND-2]}"
+                fi
+                ;;
     esac
 done
-shift $((OPTIND-1)) # skip ahead to operands
+shift $((OPTIND-1)) # skip ahead to non-options
+
 if [[ $# -lt 1 ]]; then
-    print_help      # to stdout so it can be paged
+    if [[ $want_help ]]; then
+        print_help
+    else
+        print_help brief    # to stdout so it can be paged
+    fi
     exit 0
 fi
 
+# Which command has the caller requested?
 cmd="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
-    # which command the caller has requested.
     # thanks to http://stackoverflow.com/questions/2264428#comment11480091_2264537
     # by http://stackoverflow.com/users/712605/richard-hansen
 shift # get rid of the command
 
-if [[ $1 = "-h" || $1 = "help" || $1 = "--help" ]]; then
+if [[ $cmd = 'help' ]]; then
+    want_help='yes'
+    cmd="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+    shift
+fi
+
+if [[ $want_help ]]; then
     print_help "$cmd"
     exit 0
 fi
@@ -177,30 +214,23 @@ fi
 # Sanity checks that we're on the right machine.  Not guaranteed to catch
 # everything.
 
-if [[ $cmd != touch ]]; then
-    if echo "$cmd" | grep -iq '^\(bilbo\|b.$\)' ; then
-        # bilbo commands fail if we're on frodo
-        (git config --local "$KEY_FRODOBUNDLE" ||
-         git config remote.bilbo.url
-        ) &>/dev/null &&
-            echoexit 1 "Can't run $cmd on frodo"
-    else
-        # frodo commands fail if we're on bilbo
-        (git config --local "$KEY_BILBOBUNDLE" ||
-         git config remote.frodo.url
-        ) &>/dev/null &&
-            echoexit 1 "Can't run $cmd on bilbo"
-    fi
+if echo "$cmd" | grep -iq '^\(bilbo\|b.$\)' ; then
+    # bilbo commands fail if we're on frodo
+    (git config --local "$KEY_FRODOBUNDLE" ||
+     git config remote.bilbo.url
+    ) &>/dev/null &&
+        echoexit 1 "Can't run $cmd on frodo"
+elif echo "$cmd" | grep -iq '^\(frodo\|f.$\)' ; then
+    # frodo commands fail if we're on bilbo
+    (git config --local "$KEY_BILBOBUNDLE" ||
+     git config remote.frodo.url
+    ) &>/dev/null &&
+        echoexit 1 "Can't run $cmd on bilbo"
 fi
 
 ### Main processing #######################################################
 
 case "$cmd" in
-    (help|--help)
-        print_help
-        exit
-        ;;
-
     (bilboinit|bi)
         # on bilbo, the initial home of the repo
 
