@@ -1,7 +1,7 @@
 #!/bin/bash
 # wormhole: Git bundling helper (using git bundles as a wormhole for syncing
 # when direct repo access is unavailable).
-# Copyright 2016--2017 Chris White.  CC-BY-SA 3.0.
+# Copyright 2016--2018 Chris White.  CC-BY-SA 3.0.
 # Initially based on http://stackoverflow.com/a/3639182/2877364 by
 # http://stackoverflow.com/users/119963/jefromi ; heavy modifications made.
 
@@ -28,7 +28,7 @@ EOT
     brief_help='
 Run "wormhole help <cmd>" for help about <cmd> (or "wormhole help" for all).
 Valid <cmd>s: bilboinit, frodoinit, frodopush, bilbofetch, bilbopush,
-              frodofetch, touch
+              frodofetch, touch, bundle, unbundle
 '
 
     if [[ $1 = 'brief' ]]; then
@@ -42,6 +42,8 @@ Commands and <options>:
     -h, --help, help
                 Print this help message
 '
+
+    # Command-specific help --------------------
 
     [[ -z $s || $s = bilboinit || $s = bi ]] && ok='yes' && msg+=\
 '
@@ -106,6 +108,23 @@ Commands and <options>:
                 real commits yet.
 '
 
+    [[ -z $s || $s = bundle ]] && ok='yes' && msg+=\
+'
+    bundle <filename>
+                Creates a bundle of the entire repo in <filename>.
+                You can unpack that bundle using "wormhole unbundle".
+'
+
+    [[ -z $s || $s = unbundle ]] && ok='yes' && msg+=\
+'
+    unbundle <destdir> [bundle path]
+                Unpack a bundle into <destdir>.
+                If [bundle path] is specified, use it.  Otherwise, use
+                "./bilbo.bundle".
+'
+
+    # --------------------
+
     [[ -z "$ok" ]] && msg+="Unknown command '$s'."$'\n'"${brief_help}"
 
     [[ $msg ]] && echo -n "$msg"    # -n because the text already has \n's
@@ -124,8 +143,10 @@ KEY_FRODOMTIME="vendor.chrisw.frodomtime"
 
 function echoexit()
 { #usage: echoexit <exit code> <message to print to stderr>
-    echo "$2" 1>&2
-    exit "$1"
+    local code="$1"
+    shift
+    echo "$@" 1>&2
+    exit "$code"
 } #echoexit()
 
 function abspath() {
@@ -231,19 +252,22 @@ fi
 ### Main processing #######################################################
 
 case "$cmd" in
-    (bilboinit|bi)
-        # on bilbo, the initial home of the repo
+    (bilboinit|bi|bundle)
+        # on bilbo, the initial home of the repo.
+        # bilboinit is bundle+metadata.
 
         confirmrepo "$cmd"
 
         destbundle="${1:-bilbo.bundle}"  # after :- is the default
-        touch "$destbundle"     # so abspath will work.  Also, if the file
-                                # doesn't exist, the -w test below will fail
-        destbundle="$(abspath "$destbundle")"
-        [[ -w "$destbundle" ]] || echoexit 2 "Can't write to $destbundle"
+        touch "$destbundle" || echoexit 2 "Can't write to $destbundle"
+        destbundle="$(abspath "$destbundle")"   # must be after `touch`
+
+        [[ -f $destbundle && -w $destbundle ]] ||
+            echoexit 2 "$destbundle isn't a writeable file"
 
         # Stash the bundle name for bilbopush
-        git config --local "$KEY_BILBOBUNDLE" "$destbundle"
+        [[ $cmd != bundle ]] &&
+            git config --local "$KEY_BILBOBUNDLE" "$destbundle"
 
         # Make the bundle
         git bundle create "$destbundle" --branches --tags ||
@@ -252,23 +276,32 @@ case "$cmd" in
             # Note: --branches --tags, NOT --all, because the recipient
             # doesn't care where any other remotes we have may be.
             # See git-rev-list(1) for more.
-        echo ">>> Now send $destbundle to frodo."
+
+        git bundle verify "$destbundle" ||
+            echoexit $? "Couldn't verify $destbundle"
+
+        [[ $cmd != bundle ]] && echo ">>> Now send $destbundle to frodo."
         ;;
 
-    (frodoinit|'fi')
-        # Continuing on frodo after transferring the bundle
+    (frodoinit|'fi'|unbundle)
+        # Continuing on frodo after transferring the bundle.
+        # frodoinit = unbundle+metadata.
 
         # Check options
         [[ $# -lt 1 ]] && echoexit 1 "Need a destination repo name"
         destrepo="$1"
 
         srcbundle="${2:-bilbo.bundle}"
-        [[ -r "$srcbundle" ]] || echoexit 2 "Can't access $srcbundle"
+        [[ -f "$srcbundle" && -r "$srcbundle" ]] ||
+            echoexit 2 "Can't access $srcbundle"
         srcbundle="$(abspath "$srcbundle")"
+
+        [[ $cmd = unbundle ]] && origin="bundle"
+        [[ $cmd != unbundle ]] && origin="bilbo"
 
         # Clone the bundle into frodo's repo
         echo ">>> Cloning from $srcbundle"
-        git clone -o bilbo "$srcbundle" "$destrepo" || exit $?
+        git clone -o "$origin" "$srcbundle" "$destrepo" || exit $?
         echo ">>> If there's a 'nonexistent ref' warning above, don't worry about it."
             # Note: no need to save the path to bilbo.bundle in the config
             # file, since git clone will save it as the remote pull URL.
@@ -278,22 +311,25 @@ case "$cmd" in
 
         # Set up remote tracking branches for all the branches in the bundle.
         # Note: this relies on the fact that branch names cannot include spaces.
-        for branchname in $(git branch -a | grep 'remotes/bilbo' |
-                            sed 's/^.*remotes\/bilbo\///') ; do
-            git branch "$branchname" "remotes/bilbo/$branchname" || exit $?
+        for branchname in $(git branch -a | grep "remotes/$origin" |
+                            sed 's/^.*remotes\/'"$origin"'\///') ; do
+            git branch "$branchname" "remotes/$origin/$branchname" ||
+                echoexit $? "Can't make remote-tracking branch for $branchname"
         done
 
         # Check out the master branch.  Assumes master exists.
-        git checkout master || exit $?
+        git checkout master || echoexit $? "Can't check out master"
             # Thanks to https://git.wiki.kernel.org/index.php/Git_FAQ#How_do_I_clone_a_repository_with_all_remotely_tracked_branches.3F ,
             # with thanks to http://stackoverflow.com/a/7216269/2877364 by
             # http://stackoverflow.com/users/915724/dave for the link.
 
         # you now have a clone, complete with remote branches and tags
 
-        # Since we succeeded, stash the bundle's mtime for later sanity checks
-        if mtime="$(stat -c %Y "$srcbundle" 2>/dev/null )" ; then
-            git config --local --int "$KEY_BILBOMTIME" "$mtime"
+        if [[ $cmd != unbundle ]]; then
+            # On success, stash the bundle's mtime for later sanity checks
+            if mtime="$(stat -c %Y "$srcbundle" 2>/dev/null )" ; then
+                git config --local --int "$KEY_BILBOMTIME" "$mtime"
+            fi
         fi
 
         # Report
@@ -511,6 +547,7 @@ If you need to send a bundle anyway, run 'wormhole touch' and then run
         ;;
 
     (touch)
+        confirmrepo "$cmd"
         git commit --allow-empty -m 'Empty commit from "wormhole touch"
 
 See https://github.com/cxw42/git-tools/ for more about wormhole.'
