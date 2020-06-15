@@ -1,0 +1,87 @@
+#!/bin/bash
+# Merge one file at a time into HEAD.
+# Copyright (c) 2020 D3 Engineering, LLC
+# By Christopher White, <cwhite@d3engineering.com>
+# SPDX-License-Identifier: CC-BY-SA-3.0
+
+set -Eeuo pipefail
+
+# === Command line ==========================================================
+
+if [[ "$#" -lt 2 ]]; then
+    echo "Usage: $0 [-t TOOL] [-g] COMMIT FILE..." 1>&2
+    echo "(NOT YET IMPLEMENTED) -t is --tool, and -g is -g, of git-mergetool(1)." 1>&2
+    exit 2
+fi
+
+isgui=
+mergetool=
+while getopts "gt:" opt; do
+    case "$opt" in
+    g)
+        isgui='-g'
+        ;;
+    t)
+        mergetool="$OPTARG"
+        ;;
+    *)
+        echo "Unknown option $opt" 1>&2
+        exit 2
+    esac
+done
+
+# === Collect information ===================================================
+
+into="$(git rev-parse HEAD)"
+fromname="$1"
+from="$(git rev-parse "$fromname")"
+base="$(git merge-base "$into" "$from")"
+
+shift   # remove COMMIT
+IFS=$'\n' read -r -d '' -a files < <( git ls-files -- "$@" && printf '\0' )
+
+# === Set up tools ==========================================================
+
+# TODO implement this.  Source $gitcore/git-mergetool--lib and use
+# those functions.
+#gitcore="$(git --exec-path)"
+#if [[ "$mergetool" ]]; then
+#    # TODO
+#fi
+
+# Find an editor.  TODO use a mergetool if specified.
+program=
+for f in "$(git config core.editor || true)" "${VISUAL:-}" "${EDITOR:-}" 'vi' ; do
+    if [[ "$f" ]]; then
+        program="$f"
+        break
+    fi
+done
+
+# === Process files =========================================================
+
+tmpdir="$(mktemp -d)"
+trap ': set -x ; rm -rf "'"$tmpdir"'" || true' EXIT
+
+for fn in "${files[@]}" ; do
+    echo "$fn"
+
+    mkdir -p "$(dirname "${tmpdir}/${fn}")"
+    git show "$from":"$fn" > "${tmpdir}/${fn}.THEIRS"
+    git show "$base":"$fn" > "${tmpdir}/${fn}.BASE"
+
+    mergeresult=0
+    git merge-file -L "ours (HEAD)" -L base -L "theirs ($fromname)" \
+        "$fn" "${tmpdir}/${fn}.BASE" "${tmpdir}/${fn}.THEIRS" || \
+        mergeresult="$?"
+
+    if (( mergeresult == 0 )) ; then
+        :   # nothing to do - clean merge
+    elif (( mergeresult > 0 && mergeresult <= 127)); then
+        echo "$mergeresult conflicts"
+        "$program" "$fn"
+    else
+        echo 'Merge error' 1>&2
+        exit 1
+    fi
+done
