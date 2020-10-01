@@ -1,0 +1,69 @@
+#!/bin/bash
+# git-push-submodule-change: push a change to a submodule and then
+# walk back up the tree, pushing as you go.
+# By Christopher White <cwhite@d3engineering.com>
+# Copyright (c) 2020 D3 Engineering, LLC.
+
+set -eEuo pipefail
+
+# --- main() --------------------------------------------------------------
+
+function main() {
+
+    # Args
+    if (( $# < 1 )); then
+        echo "Usage: $0 '<commit message here>' ['commit message in parents']" 1>&2
+        return 1
+    fi
+
+    local -r msg_here="$1"
+    if (( $# > 1 )); then
+        local -r msg_next="$2"
+    else
+        local -r msg_next="$msg_here"
+    fi
+
+    # Work
+    local last_repo_root=''
+    local next_repo_root
+    next_repo_root="$(next_repo_up)"
+    local last_dir=''
+    local next_dir="$PWD"
+
+    local msg="$msg_here"
+
+    while [[ "$last_repo_root" != "$next_repo_root" ]]; do
+        echo "last $last_repo_root; next $next_repo_root; here $next_dir"
+
+        if [[ ! "$last_dir" ]]; then
+            git add .
+        else
+            git add "$last_dir"
+        fi
+
+        git commit -m "$msg"
+
+        git push
+
+        # Iterate
+        last_repo_root="$next_repo_root"
+        last_dir="$next_dir"
+
+        cd "$next_repo_root" || return 1
+        next_repo_root="$(next_repo_up)"
+        next_dir="$PWD"
+
+        msg="$msg_next"
+    done
+}
+
+# --- Helpers -------------------------------------------------------------
+
+# Get the root directory of the next repo up.
+function next_repo_up() {
+    git rev-parse --show-superproject-working-tree
+}
+
+# --- Go, Speed Racer! ----------------------------------------------------
+
+main "$@"
