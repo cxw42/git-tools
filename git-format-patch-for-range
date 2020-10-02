@@ -1,0 +1,81 @@
+#!/bin/bash
+# git-format-patch-for-range --- make one patch for a range of commits
+# Usage: $0 <previous commit> <head commit> <dest filename>
+# The range will be <previous commit>..<head commit>, i.e., head back to
+# the one just after previous.
+# Outputs to stdout.
+# By Christopher White <cwhite@d3engineering.com>
+# Copyright (c) 2020 D3 Engineering, LLC.
+
+set -eEuo pipefail
+set -x
+
+old_headG=
+old_branchG=
+doneG=
+
+main() {
+    if [[ "$#" -ne 3 ]]; then
+        usage
+        return 2
+    fi
+
+    # Save where to get back to
+    old_headG="$(git status -b --porcelain=2 | awk '/branch\.oid/ { print $3}')"
+    old_branchG="$(git status -b --porcelain=2 | awk '/branch\.head/ { print $3}')" || true # there may not be a branch
+
+    # Make sure it's clean
+    local -r status="$(git status --short)"
+    if [[ "$status" ]]; then
+        echo "Working directory is not clean - aborting" 1>&2
+        return 1
+    fi
+
+    local -r prev="$1"
+    local -r head="$2"
+    local -r destfn="$3"
+    touch "$destfn" # bail early if unwriteable
+
+    local -r now="$(date +'%F-%H%M%S')"
+    local -r branch="TEMP-$now"
+
+    trap cleanup EXIT
+
+    # Set up
+    git checkout -b "$branch" "$prev"
+    git merge --squash "$head"
+    git commit --edit -m"$(git log --format='# commit %h by %aN, committed %cr%n%n%B' HEAD.."$head")"
+
+    # Make the patch
+    git format-patch -1 --stdout > "$destfn"
+
+    # Cleanup
+    git branch -D "$branch" || true
+    doneG=1
+}
+
+switch_back() {
+    if [[ "$old_branchG" ]]; then
+        git checkout "$old_branchG"
+    else
+        git checkout "$old_headG"
+    fi
+}
+
+cleanup() {
+    if (( doneG )); then
+        switch_back
+    else
+        echo "Incomplete - old branch was $old_branchG $old_headG"
+    fi
+}
+
+usage() {
+    cat 1>&2 <<EOT
+Usage: $0 <previous commit> <head commit> <dest filename>
+The range will be <previous commit>..<head commit>, so <previous commit>
+is not included.  Outputs to stdout.
+EOT
+}
+
+main "$@"
