@@ -1,9 +1,11 @@
 #!/bin/bash
+#
 # git-format-patch-for-range --- make one patch for a range of commits
 # Usage: $0 <previous commit> <head commit> <dest filename>
 # The range will be <previous commit>..<head commit>, i.e., head back to
 # the one just after previous.
-# Outputs to stdout.
+# Outputs to <dest filename>.
+#
 # By Christopher White <cwhite@d3engineering.com>
 # Copyright (c) 2020 D3 Engineering, LLC.
 
@@ -12,6 +14,7 @@ set -x
 
 old_headG=
 old_branchG=
+working_branchG=
 doneG=
 
 main() {
@@ -31,18 +34,23 @@ main() {
         return 1
     fi
 
-    local -r prev="$1"
-    local -r head="$2"
+    # Capture the refs and convert them to commits before switching branches.
+    # Otherwise, `HEAD` is different when we use it than when the user
+    # typed it in.
+    local prev="$1"
+    prev="$(git rev-parse "$prev")" # on a separate line for -e
+    local head="$2"
+    head="$(git rev-parse "$head")"
     local -r destfn="$3"
     touch "$destfn" # bail early if unwriteable
 
     local -r now="$(date +'%F-%H%M%S')"
-    local -r branch="TEMP-$now"
+    working_branchG="TEMP-$now"
 
     trap cleanup EXIT
 
     # Set up
-    git checkout -b "$branch" "$prev"
+    git checkout -b "$working_branchG" "$prev"
     git merge --squash "$head"
     git commit --edit -m"$(git log --format='# commit %h by %aN, committed %cr%n%n%B' HEAD.."$head")"
 
@@ -50,7 +58,6 @@ main() {
     git format-patch -1 --stdout > "$destfn"
 
     # Cleanup
-    git branch -D "$branch" || true
     doneG=1
 }
 
@@ -60,6 +67,7 @@ switch_back() {
     else
         git checkout "$old_headG"
     fi
+    git branch -D "$working_branchG" || true
 }
 
 cleanup() {
@@ -74,7 +82,7 @@ usage() {
     cat 1>&2 <<EOT
 Usage: $0 <previous commit> <head commit> <dest filename>
 The range will be <previous commit>..<head commit>, so <previous commit>
-is not included.  Outputs to stdout.
+is not included.  Outputs to <dest filename>.
 EOT
 }
 
